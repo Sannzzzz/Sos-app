@@ -26,6 +26,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
+      "googleServicesFile": "./google-services.json",
       "package": "com.sosapp.scrunchie",
       "permissions": [
         "android.permission.BLUETOOTH",
@@ -35,11 +36,10 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_BACKGROUND_LOCATION",
-        "android.permission.SEND_SMS",
-        "android.permission.READ_PHONE_STATE",
         "android.permission.VIBRATE",
         "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.FOREGROUND_SERVICE"
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ]
     },
     "web": {
@@ -77,18 +77,18 @@
           ],
           "bluetoothAlwaysPermission": "Allow Smart SOS to use Bluetooth to connect to your scrunchie device"
         }
-      ],
-      "./plugins/with-direct-sms.js",
-      "./plugins/with-direct-sms-package.js"
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": "your-project-id"
+        "projectId": "4d001e75-cca1-46a0-9b04-3c3ead61d18c"
       }
-    }
+    },
+    "owner": "sandhya_ms"
   }
 }

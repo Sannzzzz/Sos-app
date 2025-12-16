@@ -10,11 +10,12 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { bleService, Device } from "@/services/ble-service";
+import { bleService } from "@/services/ble-service";
 import { sosService } from "@/services/sos-service";
+import { firebaseService } from "@/services/firebase-service";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const STORAGE_KEY = "@contacts";
+const STORAGE_KEY = "@contacts_v2";
 
 export default function Home() {
   const router = useRouter();
@@ -26,6 +27,15 @@ export default function Home() {
   const [contactCount, setContactCount] = useState(0);
   const [lastSOSTime, setLastSOSTime] = useState<string | null>(null);
   const [sosStatus, setSOSStatus] = useState<string>("");
+
+  // Init Firebase & Push Notifications
+  useEffect(() => {
+    const initApp = async () => {
+      await firebaseService.init();
+      firebaseService.setupNotificationHandler();
+    };
+    initApp();
+  }, []);
 
   // Load contact count
   useEffect(() => {
@@ -49,27 +59,38 @@ export default function Home() {
     console.log("🚨 SOS TRIGGERED FROM SCRUNCHIE!");
 
     // Vibrate immediately
-    Vibration.vibrate([0, 500, 200, 500, 200, 500]);
+    Vibration.vibrate([0, 300, 100, 300]);
 
-    setSOSStatus("🚨 SOS SIGNAL RECEIVED! Sending alerts...");
+    setSOSStatus("🚨 SOS SIGNAL RECEIVED! Sending Alert...");
 
     try {
-      const result = await sosService.triggerSOS((status) => {
+      // Timeout after 15 seconds
+      const timeoutPromise = new Promise<{ success: boolean; message: string }>((resolve) => {
+        setTimeout(() => {
+          resolve({ success: false, message: "Timeout - please try again" });
+        }, 15000);
+      });
+
+      const sosPromise = sosService.triggerSOS((status) => {
         setSOSStatus(status);
       });
+
+      const result = await Promise.race([sosPromise, timeoutPromise]);
 
       if (result.success) {
         setSOSStatus("✅ " + result.message);
         setLastSOSTime(new Date().toLocaleTimeString());
       } else {
         setSOSStatus("❌ " + result.message);
+        sosService.resetSendingState();
       }
 
-      // Clear status after 10 seconds
-      setTimeout(() => setSOSStatus(""), 10000);
+      // Clear status after 8 seconds
+      setTimeout(() => setSOSStatus(""), 8000);
     } catch (error) {
       setSOSStatus("❌ Error sending SOS");
       console.error("SOS Error:", error);
+      sosService.resetSendingState();
     }
   }, []);
 
@@ -98,14 +119,6 @@ export default function Home() {
     bleService.setSOSCallback(handleSOSTrigger);
   }, [handleSOSTrigger]);
 
-  const showAlert = (title: string, message: string) => {
-    if (Platform.OS === "web") {
-      window.alert(`${title}\n\n${message}`);
-    } else {
-      Alert.alert(title, message);
-    }
-  };
-
   return (
     <View style={[styles.container, isDark && styles.containerDark]}>
       {/* Status Section */}
@@ -126,7 +139,7 @@ export default function Home() {
           <View style={styles.statItem}>
             <Text style={styles.statNumber}>{contactCount}</Text>
             <Text style={[styles.statLabel, isDark && styles.statLabelDark]}>
-              Contacts
+              Linked Contacts
             </Text>
           </View>
           <View style={styles.statDivider} />
@@ -135,7 +148,7 @@ export default function Home() {
               {lastSOSTime || "--:--"}
             </Text>
             <Text style={[styles.statLabel, isDark && styles.statLabelDark]}>
-              Last SOS
+              Last Alert
             </Text>
           </View>
         </View>
@@ -161,7 +174,7 @@ export default function Home() {
         </Text>
         <Text style={[styles.subtitle, isDark && styles.subtitleDark]}>
           {isConnected
-            ? "Your scrunchie is connected and ready. Press the SOS button on your scrunchie to send emergency alerts."
+            ? "Your scrunchie is connected and ready. Press the SOS button on your scrunchie to send emergency push alerts."
             : "Connect your SOS scrunchie via Bluetooth to enable automatic emergency alerts."}
         </Text>
       </View>
@@ -199,11 +212,11 @@ export default function Home() {
           <View style={[styles.cardContent, { backgroundColor: "#059669" }]}>
             <Text style={styles.cardIcon}>👥</Text>
             <View style={styles.cardTextContainer}>
-              <Text style={styles.cardTitle}>Emergency Contacts</Text>
+              <Text style={styles.cardTitle}>Linked Devices</Text>
               <Text style={styles.cardDescription}>
                 {contactCount > 0
-                  ? `${contactCount} contact(s) configured`
-                  : "Add your emergency contacts"}
+                  ? `${contactCount} contact(s) linked`
+                  : "Add family member's User ID"}
               </Text>
             </View>
           </View>
@@ -230,7 +243,7 @@ export default function Home() {
       {!isConnected && contactCount === 0 && (
         <View style={styles.infoBanner}>
           <Text style={styles.infoBannerText}>
-            ⚠️ Setup not complete: Add contacts and connect your scrunchie
+            ⚠️ Setup not complete: Link a contact and connect your scrunchie
           </Text>
         </View>
       )}

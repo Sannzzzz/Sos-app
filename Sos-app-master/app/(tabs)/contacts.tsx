@@ -8,48 +8,47 @@ import {
   StyleSheet,
   Platform,
   Alert,
+  ActivityIndicator,
+  Clipboard
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { firebaseService } from "@/services/firebase-service";
 
-const STORAGE_KEY = "@contacts";
+const STORAGE_KEY = "@contacts_v2";
 
 interface Contact {
-  id: string;
-  phone: string;
+  id: string; // User ID
   name: string;
 }
 
 export default function Contacts() {
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [phoneInput, setPhoneInput] = useState("");
+  const [userIdInput, setUserIdInput] = useState("");
   const [nameInput, setNameInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [myUserId, setMyUserId] = useState("Loading...");
+
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
 
   useEffect(() => {
-    loadContacts();
+    initService();
   }, []);
+
+  const initService = async () => {
+    await firebaseService.init();
+    setMyUserId(firebaseService.getUserId());
+    loadContacts();
+  };
 
   const loadContacts = async () => {
     try {
+      // For MVP, we still store the "My Contacts" list locally for speed
+      // But we verify them against Firebase when needed
       const saved = await AsyncStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved);
-        // Handle migration from old format (array of strings)
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          if (typeof parsed[0] === "string") {
-            const migrated = parsed.map((phone: string, index: number) => ({
-              id: `contact_${index}_${Date.now()}`,
-              phone,
-              name: `Contact ${index + 1}`,
-            }));
-            setContacts(migrated);
-            await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
-          } else {
-            setContacts(parsed);
-          }
-        }
+        setContacts(JSON.parse(saved));
       }
     } catch (error) {
       console.error("Error loading contacts:", error);
@@ -61,105 +60,125 @@ export default function Contacts() {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
   };
 
-  const showAlert = (title: string, message: string) => {
-    if (Platform.OS === "web") {
-      window.alert(`${title}\n\n${message}`);
-    } else {
-      Alert.alert(title, message);
-    }
+  const copyUserId = () => {
+    Clipboard.setString(myUserId);
+    if (Platform.OS === 'web') window.alert('User ID Copied!');
+    else Alert.alert('Copied!', 'Share this ID with your family so they can add you.');
   };
 
-  const addContact = () => {
-    const phone = phoneInput.trim();
+  const addContact = async () => {
+    const contactId = userIdInput.trim();
     const name = nameInput.trim() || "Emergency Contact";
 
-    if (!phone) {
-      showAlert("Error", "Please enter a phone number");
+    if (!contactId) {
+      Alert.alert("Error", "Please enter a User ID");
       return;
     }
 
-    // Basic phone validation
-    const phoneRegex = /^[+]?[\d\s-()]{7,}$/;
-    if (!phoneRegex.test(phone)) {
-      showAlert("Invalid Phone", "Please enter a valid phone number");
+    if (contactId === myUserId) {
+      Alert.alert("Error", "You cannot add yourself as a contact");
       return;
     }
 
-    // Check for duplicate
-    if (contacts.some((c) => c.phone === phone)) {
-      showAlert("Duplicate", "This phone number is already added");
+    if (contacts.some(c => c.id === contactId)) {
+      Alert.alert("Error", "This user is already in your contacts");
       return;
     }
 
-    const newContact: Contact = {
-      id: `contact_${Date.now()}`,
-      phone,
-      name,
-    };
+    setLoading(true);
 
-    saveContacts([...contacts, newContact]);
-    setPhoneInput("");
-    setNameInput("");
+    // Verify user exists in Firebase
+    const result = await firebaseService.addContact(contactId, name);
+
+    if (result.success) {
+      const newContact: Contact = { id: contactId, name };
+      saveContacts([...contacts, newContact]);
+      setUserIdInput("");
+      setNameInput("");
+      Alert.alert("Success", "Contact added & verified!");
+    } else {
+      Alert.alert("Error", result.message);
+    }
+
+    setLoading(false);
   };
 
   const deleteContact = (id: string) => {
-    const updated = contacts.filter((c) => c.id !== id);
-    saveContacts(updated);
+    Alert.alert(
+      "Remove Contact",
+      "Are you sure?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => {
+            const updated = contacts.filter((c) => c.id !== id);
+            saveContacts(updated);
+          }
+        }
+      ]
+    );
   };
 
   return (
     <View style={[styles.container, isDark && styles.containerDark]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={[styles.title, isDark && styles.titleDark]}>
-          Emergency Contacts
-        </Text>
-        <Text style={[styles.subtitle, isDark && styles.subtitleDark]}>
-          Add trusted people who will receive your SOS alerts
-        </Text>
+      {/* My ID Section */}
+      <View style={[styles.idCard, isDark && styles.idCardDark]}>
+        <Text style={styles.idLabel}>Your App User ID:</Text>
+        <TouchableOpacity onPress={copyUserId} style={styles.idRow}>
+          <Text style={[styles.idText, isDark && styles.idTextDark]}>{myUserId}</Text>
+          <Text style={styles.copyIcon}>📋</Text>
+        </TouchableOpacity>
+        <Text style={styles.idHint}>Share this with family so they can add you.</Text>
       </View>
 
       {/* Add Contact Form */}
       <View style={[styles.formCard, isDark && styles.formCardDark]}>
+        <Text style={[styles.formTitle, isDark && styles.formTitleDark]}>Add Emergency Contact</Text>
         <TextInput
           style={[styles.input, isDark && styles.inputDark]}
-          placeholder="Contact Name (optional)"
+          placeholder="Contact Name (e.g. Mom)"
           placeholderTextColor={isDark ? "#64748b" : "#94a3b8"}
           value={nameInput}
           onChangeText={setNameInput}
         />
         <TextInput
           style={[styles.input, isDark && styles.inputDark]}
-          placeholder="Phone Number"
+          placeholder="Enter their App User ID"
           placeholderTextColor={isDark ? "#64748b" : "#94a3b8"}
-          keyboardType="phone-pad"
-          value={phoneInput}
-          onChangeText={setPhoneInput}
+          value={userIdInput}
+          onChangeText={setUserIdInput}
+          autoCapitalize="none"
         />
         <TouchableOpacity
-          style={styles.addButton}
+          style={[styles.addButton, loading && styles.disabledButton]}
           onPress={addContact}
-          activeOpacity={0.8}
+          disabled={loading}
         >
-          <Text style={styles.addButtonText}>➕ Add Contact</Text>
+          {loading ? (
+            <ActivityIndicator color="white" />
+          ) : (
+            <Text style={styles.addButtonText}>Connect User</Text>
+          )}
         </TouchableOpacity>
       </View>
 
       {/* Contacts List */}
       <View style={styles.listHeader}>
         <Text style={[styles.listTitle, isDark && styles.listTitleDark]}>
-          Your Contacts ({contacts.length})
+          Linked Devices ({contacts.length})
         </Text>
       </View>
 
       {contacts.length === 0 ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyIcon}>📇</Text>
+          <Text style={styles.emptyIcon}>📱</Text>
           <Text style={[styles.emptyText, isDark && styles.emptyTextDark]}>
-            No emergency contacts yet
+            No devices linked
           </Text>
           <Text style={[styles.emptySubtext, isDark && styles.emptySubtextDark]}>
-            Add contacts above to get started
+            Add a User ID above to link a device.
           </Text>
         </View>
       ) : (
@@ -167,7 +186,6 @@ export default function Contacts() {
           style={styles.list}
           data={contacts}
           keyExtractor={(item) => item.id}
-          showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
             <View style={[styles.contactCard, isDark && styles.contactCardDark]}>
               <View style={styles.contactInfo}>
@@ -181,14 +199,13 @@ export default function Contacts() {
                     {item.name}
                   </Text>
                   <Text style={[styles.contactPhone, isDark && styles.contactPhoneDark]}>
-                    {item.phone}
+                    ID: {item.id}
                   </Text>
                 </View>
               </View>
               <TouchableOpacity
                 style={styles.deleteButton}
                 onPress={() => deleteContact(item.id)}
-                activeOpacity={0.7}
               >
                 <Text style={styles.deleteButtonText}>🗑️</Text>
               </TouchableOpacity>
@@ -209,25 +226,54 @@ const styles = StyleSheet.create({
   containerDark: {
     backgroundColor: "#0f0f23",
   },
-  header: {
+  idCard: {
+    backgroundColor: "#dbeafe",
+    padding: 16,
+    borderRadius: 12,
     marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#bfdbfe"
   },
-  title: {
-    fontSize: 28,
-    fontWeight: "800",
-    color: "#1a1a2e",
-    marginBottom: 8,
+  idCardDark: {
+    backgroundColor: "#1e3a8a",
+    borderColor: "#2563eb"
   },
-  titleDark: {
-    color: "#ffffff",
+  idLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#2563eb",
+    marginBottom: 4
   },
-  subtitle: {
-    fontSize: 15,
-    color: "#64748b",
-    lineHeight: 22,
+  idRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8
   },
-  subtitleDark: {
-    color: "#94a3b8",
+  idText: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#1e3a8a",
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace'
+  },
+  idTextDark: {
+    color: "#dbeafe"
+  },
+  copyIcon: {
+    fontSize: 18
+  },
+  idHint: {
+    fontSize: 11,
+    color: "#60a5fa"
+  },
+  formTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+    color: '#334155'
+  },
+  formTitleDark: {
+    color: '#e2e8f0'
   },
   formCard: {
     backgroundColor: "#ffffff",
@@ -245,16 +291,17 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: "#f1f5f9",
-    borderWidth: 2,
-    borderColor: "transparent",
-    padding: 16,
-    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    padding: 14,
+    borderRadius: 10,
     marginBottom: 12,
     fontSize: 16,
     color: "#1a1a2e",
   },
   inputDark: {
     backgroundColor: "#334155",
+    borderColor: "#475569",
     color: "#ffffff",
   },
   addButton: {
@@ -263,6 +310,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
     marginTop: 4,
+  },
+  disabledButton: {
+    opacity: 0.7
   },
   addButtonText: {
     color: "#ffffff",
@@ -358,8 +408,9 @@ const styles = StyleSheet.create({
     color: "#ffffff",
   },
   contactPhone: {
-    fontSize: 14,
+    fontSize: 12,
     color: "#64748b",
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace'
   },
   contactPhoneDark: {
     color: "#94a3b8",

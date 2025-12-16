@@ -34,30 +34,42 @@ export default function TestSOS() {
     if (isLoading) return;
 
     setIsLoading(true);
+    setStatus("🚀 Starting SOS...");
 
-    // Vibrate to indicate action
-    Vibration.vibrate([0, 200, 100, 200]);
+    // Short vibrate to indicate action
+    Vibration.vibrate(200);
 
     try {
-      const result = await sosService.triggerSOS((statusUpdate) => {
+      // Set a maximum timeout for the entire operation
+      const timeoutPromise = new Promise<{ success: boolean; message: string }>((resolve) => {
+        setTimeout(() => {
+          resolve({ success: false, message: "Operation timed out. Please try again." });
+        }, 10000); // 10 second max
+      });
+
+      const sosPromise = sosService.triggerSOS((statusUpdate) => {
         setStatus(statusUpdate);
       });
+
+      const result = await Promise.race([sosPromise, timeoutPromise]);
 
       if (result.success) {
         setStatus("✅ " + result.message);
         setLastSentTime(new Date().toLocaleTimeString());
-        showAlert("Success", result.message);
       } else {
         setStatus("❌ " + result.message);
-        showAlert("Error", result.message);
+        showAlert("Notice", result.message);
       }
     } catch (error) {
+      console.error("SOS Error:", error);
       setStatus("❌ Error sending SOS");
       showAlert("Error", "Failed to send SOS. Please try again.");
+      // Reset the service state in case it got stuck
+      sosService.resetSendingState();
     } finally {
       setIsLoading(false);
-      // Clear status after 10 seconds
-      setTimeout(() => setStatus(""), 10000);
+      // Clear status after 8 seconds
+      setTimeout(() => setStatus(""), 8000);
     }
   };
 
@@ -156,7 +168,7 @@ export default function TestSOS() {
               <Text style={styles.stepNumberText}>3</Text>
             </View>
             <Text style={[styles.instructionText, isDark && styles.instructionTextDark]}>
-              Emergency SMS with location is sent to all contacts
+              Emergency ALERT with location is sent to all linked devices
             </Text>
           </View>
         </View>
@@ -166,9 +178,7 @@ export default function TestSOS() {
       <View style={styles.noticeCard}>
         <Text style={styles.noticeIcon}>⚡</Text>
         <Text style={styles.noticeText}>
-          {Platform.OS === "android"
-            ? "On APK build, SMS will be sent automatically without opening the messaging app."
-            : "This test will use your device's SMS capabilities."}
+          Alerts are sent using internet connection to all linked family members instantly.
         </Text>
       </View>
     </View>
